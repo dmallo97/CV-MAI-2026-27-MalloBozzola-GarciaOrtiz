@@ -13,7 +13,17 @@ CHANNELS = ("R", "G", "B")
 
 
 def _parse_selection(raw: str) -> list[str]:
-    ...
+    cleaned = raw.strip().upper().replace(" ", "").replace(",", "")
+    if not cleaned:
+        raise ValueError("Choose at least one channel (R, G, or B).")
+    seen: list[str] = []
+    for char in cleaned:
+        if char not in CHANNELS:
+            raise ValueError(f"Unknown channel '{char}'. Use R, G, or B.")
+        if char in seen:
+            raise ValueError(f"Channel '{char}' selected more than once.")
+        seen.append(char)
+    return seen
 
 
 def extract_channels(image: Image.Image, channels: Sequence[str]) -> Image.Image:
