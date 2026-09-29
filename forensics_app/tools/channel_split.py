@@ -27,7 +27,23 @@ def _parse_selection(raw: str) -> list[str]:
 
 
 def extract_channels(image: Image.Image, channels: Sequence[str]) -> Image.Image:
-    ...
+    selection = list(channels)
+    if not selection:
+        raise ValueError("Choose at least one channel (R, G, or B).")
+    for name in selection:
+        if name not in CHANNELS:
+            raise ValueError(f"Unknown channel '{name}'. Use R, G, or B.")
+
+    rgb = image if image.mode == "RGB" else image.convert("RGB")
+    r, g, b = rgb.split()
+    lookup = {"R": r, "G": g, "B": b}
+
+    if len(selection) == 1:
+        return lookup[selection[0]].copy()
+
+    zero = Image.new("L", rgb.size, 0)
+    bands = tuple(lookup[name] if name in selection else zero for name in CHANNELS)
+    return Image.merge("RGB", bands)
 
 
 class ChannelSplitTool(ForensicsTool):
