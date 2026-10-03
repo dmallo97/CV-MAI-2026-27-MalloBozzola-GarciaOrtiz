@@ -6,6 +6,7 @@ from .image_info import ImageInfoTool
 from .registry import ToolRegistry
 from .histogram import HistogramVisualizationTool
 from .contrast_stretching import ContrastStretchingTool
+from .convolution import GaussianConvolutionTool
 
 
 def build_tool_registry() -> ToolRegistry:
@@ -16,6 +17,7 @@ def build_tool_registry() -> ToolRegistry:
             HistogramVisualizationTool(),
             ContrastStretchingTool(),
             ChannelSplitTool(),
+            GaussianConvolutionTool(),
         ]
     )
 
