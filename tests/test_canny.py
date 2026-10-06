@@ -6,8 +6,10 @@ from PIL import Image
 
 from forensics_app.core import ImageDocument
 from forensics_app.tools.canny import (
+    ANALYSIS_KEY,
+    NO_EDGES_MESSAGE,
     CannyEdgeTool,
-    _parse_visualization,
+    EdgeVisualizationTool,
     canny_edges,
     edge_map,
     overlay_edges,
@@ -19,6 +21,12 @@ def _square(mode: str = "RGB") -> Image.Image:
     fill = 200 if mode == "L" else (200, 200, 200)
     image.paste(fill, (10, 10, 30, 30))
     return image
+
+
+def _document(image: Image.Image) -> ImageDocument:
+    document = ImageDocument()
+    document.current = image
+    return document
 
 
 class CannyEdgesTests(unittest.TestCase):
@@ -43,8 +51,8 @@ class CannyEdgesTests(unittest.TestCase):
             canny_edges(_square(), 0)
 
 
-class EdgeMapTests(unittest.TestCase):
-    def test_edges_are_white_on_black(self) -> None:
+class EdgeImageTests(unittest.TestCase):
+    def test_edge_map_is_white_on_black(self) -> None:
         edges = canny_edges(_square(), 1.0)
         output = edge_map(edges)
 
@@ -54,16 +62,7 @@ class EdgeMapTests(unittest.TestCase):
         self.assertTrue((result[edges] == 255).all())
         self.assertTrue((result[~edges] == 0).all())
 
-    def test_parse_visualization(self) -> None:
-        self.assertEqual(_parse_visualization(""), "edges")
-        self.assertEqual(_parse_visualization(" Overlay "), "overlay")
-        self.assertEqual(_parse_visualization("e"), "edges")
-        with self.assertRaises(ValueError):
-            _parse_visualization("blue")
-
-
-class OverlayEdgesTests(unittest.TestCase):
-    def test_edges_are_red_and_rest_is_grayscale(self) -> None:
+    def test_overlay_edges_are_red_and_rest_is_grayscale(self) -> None:
         image = _square()
         edges = canny_edges(image, 1.0)
         output = np.asarray(overlay_edges(image, edges))
@@ -77,43 +76,52 @@ class OverlayEdgesTests(unittest.TestCase):
 
 class CannyEdgeToolTests(unittest.TestCase):
     @patch("forensics_app.tools.canny.simpledialog.askfloat", return_value=2.0)
-    @patch("forensics_app.tools.canny.simpledialog.askstring", return_value="edges")
-    def test_edges_returns_edge_map_without_mutating_document(self, _ask_string, _ask_float) -> None:
-        document = ImageDocument()
-        document.current = _square("L")
+    def test_returns_edge_map_and_stores_edges(self, _ask_float) -> None:
+        document = _document(_square())
         original = document.current.copy()
 
         result = CannyEdgeTool().run(None, document)
 
-        self.assertEqual(result.details["Visualization"], "edges")
         self.assertEqual(result.details["Sigma"], "2")
         self.assertEqual(result.image.mode, "L")
         self.assertEqual(set(np.unique(np.asarray(result.image))), {0, 255})
         self.assertEqual(list(document.current.getdata()), list(original.getdata()))
-
-    @patch("forensics_app.tools.canny.simpledialog.askfloat", return_value=1.0)
-    @patch("forensics_app.tools.canny.simpledialog.askstring", return_value="overlay")
-    def test_overlay_returns_rgb_image(self, _ask_string, _ask_float) -> None:
-        document = ImageDocument()
-        document.current = _square()
-
-        result = CannyEdgeTool().run(None, document)
-
-        self.assertEqual(result.details["Visualization"], "overlay")
-        self.assertEqual(result.image.mode, "RGB")
-
-    @patch("forensics_app.tools.canny.simpledialog.askstring", return_value=None)
-    def test_cancel_visualization_returns_none(self, _ask_string) -> None:
-        document = ImageDocument()
-        document.current = _square()
-        self.assertIsNone(CannyEdgeTool().run(None, document))
+        stored = document.analyses[ANALYSIS_KEY]
+        self.assertEqual(stored.sigma, 2.0)
+        np.testing.assert_array_equal(stored.edges, np.asarray(result.image) == 255)
 
     @patch("forensics_app.tools.canny.simpledialog.askfloat", return_value=None)
-    @patch("forensics_app.tools.canny.simpledialog.askstring", return_value="edges")
-    def test_cancel_sigma_returns_none(self, _ask_string, _ask_float) -> None:
-        document = ImageDocument()
-        document.current = _square()
+    def test_cancel_returns_none_and_stores_nothing(self, _ask_float) -> None:
+        document = _document(_square())
         self.assertIsNone(CannyEdgeTool().run(None, document))
+        self.assertNotIn(ANALYSIS_KEY, document.analyses)
+
+
+class EdgeVisualizationToolTests(unittest.TestCase):
+    def test_unavailable_before_edge_detection(self) -> None:
+        document = _document(_square())
+        tool = EdgeVisualizationTool()
+
+        self.assertFalse(tool.is_available(document))
+        self.assertEqual(tool.unavailable_message, NO_EDGES_MESSAGE)
+        result = tool.run(None, document)
+        self.assertIsNone(result.image)
+        self.assertEqual(result.message, NO_EDGES_MESSAGE)
+
+    @patch("forensics_app.tools.canny.simpledialog.askfloat", return_value=1.0)
+    def test_overlays_edges_on_image_used_for_detection(self, _ask_float) -> None:
+        document = _document(_square())
+        detection = CannyEdgeTool().run(None, document)
+        document.apply(detection.image)  # as the main window would
+        tool = EdgeVisualizationTool()
+
+        self.assertTrue(tool.is_available(document))
+        result = tool.run(None, document)
+
+        self.assertEqual(result.image.mode, "RGB")
+        edges = document.analyses[ANALYSIS_KEY].edges
+        expected = overlay_edges(_square(), edges)
+        self.assertEqual(list(result.image.getdata()), list(expected.getdata()))
 
 
 if __name__ == "__main__":
