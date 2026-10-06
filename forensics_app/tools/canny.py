@@ -1,7 +1,8 @@
-"""Canny edge detection shown as an edge map or as red edges over the grayscale image."""
+"""Canny edge detection and visualization of the detected edges."""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import tkinter as tk
 from tkinter import simpledialog
 
@@ -13,17 +14,17 @@ from forensics_app.core import ImageDocument
 from .base import ForensicsTool, ToolResult
 
 
-VISUALIZATIONS = ("edges", "overlay")
+ANALYSIS_KEY = "canny"
+NO_EDGES_MESSAGE = "No edges detected yet. Run Canny edge detection first."
 
 
-def _parse_visualization(raw: str) -> str:
-    cleaned = raw.strip().lower()
-    if not cleaned:
-        return "edges"
-    for visualization in VISUALIZATIONS:
-        if visualization.startswith(cleaned):
-            return visualization
-    raise ValueError(f"Unknown visualization '{raw}'. Use edges or overlay.")
+@dataclass(frozen=True)
+class CannyResult:
+    """Edges found by the Canny tool and the image they were detected on."""
+
+    source: Image.Image
+    edges: np.ndarray
+    sigma: float
 
 
 def canny_edges(image: Image.Image, sigma: float = 1.0) -> np.ndarray:
@@ -50,29 +51,21 @@ def overlay_edges(image: Image.Image, edges: np.ndarray) -> Image.Image:
     return Image.fromarray(img_as_ubyte(red_edges), mode="RGB")
 
 
+def _edge_details(edges: np.ndarray) -> dict[str, str]:
+    edge_pixels = int(edges.sum())
+    return {
+        "Edge pixels": f"{edge_pixels:,}",
+        "Edge density": f"{edge_pixels / edges.size:.2%}",
+    }
+
+
 class CannyEdgeTool(ForensicsTool):
     tool_id = "canny_edges"
     title = "Canny edge detection"
-    category = "Analysis"
-    description = "Detect edges with the Canny algorithm as an edge map or as red edges over the grayscale image."
+    category = "Edge detection"
+    description = "Detect edges with the Canny algorithm and show them in white on a black background."
 
     def run(self, parent: tk.Misc, document: ImageDocument) -> ToolResult | None:
-        raw_visualization = simpledialog.askstring(
-            "Canny edge detection",
-            "Visualization (edges = edge map, overlay = red edges on grayscale):",
-            parent=parent,
-            initialvalue="edges",
-        )
-        if raw_visualization is None:
-            return None
-        try:
-            visualization = _parse_visualization(raw_visualization)
-        except ValueError as error:
-            return ToolResult(
-                message=f"Canny edge detection cancelled: {error}",
-                details={"Input": raw_visualization, "Error": str(error)},
-            )
-
         sigma = simpledialog.askfloat(
             "Canny edge detection",
             "Sigma (standard deviation of the Gaussian smoothing):",
@@ -86,22 +79,40 @@ class CannyEdgeTool(ForensicsTool):
 
         assert document.current is not None
         edges = canny_edges(document.current, sigma)
-        if visualization == "overlay":
-            output = overlay_edges(document.current, edges)
-            shown_as = "edges shown in red over the grayscale image"
-        else:
-            output = edge_map(edges)
-            shown_as = "edges shown in white on black"
-        edge_pixels = int(edges.sum())
+        document.analyses[ANALYSIS_KEY] = CannyResult(document.current.copy(), edges, sigma)
         return ToolResult(
-            image=output,
-            message=f"Detected Canny edges (sigma={sigma:g}); {shown_as}.",
+            image=edge_map(edges),
+            message=f"Detected Canny edges (sigma={sigma:g}).",
             details={
                 "Operation": "Canny edge detection",
-                "Visualization": visualization,
                 "Sigma": f"{sigma:g}",
-                "Edge pixels": f"{edge_pixels:,}",
-                "Edge density": f"{edge_pixels / edges.size:.2%}",
-                "Output mode": output.mode,
+                **_edge_details(edges),
+            },
+        )
+
+
+class EdgeVisualizationTool(ForensicsTool):
+    tool_id = "edge_visualization"
+    title = "Edge visualization"
+    category = "Edge detection"
+    description = "Draw the last detected Canny edges in red over the grayscale image they came from."
+    unavailable_message = NO_EDGES_MESSAGE
+
+    def is_available(self, document: ImageDocument) -> bool:
+        return ANALYSIS_KEY in document.analyses
+
+    def run(self, parent: tk.Misc, document: ImageDocument) -> ToolResult:
+        result: CannyResult | None = document.analyses.get(ANALYSIS_KEY)
+        if result is None:
+            return ToolResult(message=NO_EDGES_MESSAGE)
+
+        output = overlay_edges(result.source, result.edges)
+        return ToolResult(
+            image=output,
+            message=f"Showing Canny edges (sigma={result.sigma:g}) in red over the grayscale image.",
+            details={
+                "Operation": "Edge visualization",
+                "Sigma": f"{result.sigma:g}",
+                **_edge_details(result.edges),
             },
         )
