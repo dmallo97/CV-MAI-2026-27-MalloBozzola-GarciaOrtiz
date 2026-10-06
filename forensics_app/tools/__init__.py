@@ -7,6 +7,7 @@ from .registry import ToolRegistry
 from .histogram import HistogramVisualizationTool
 from .contrast_stretching import ContrastStretchingTool
 from .convolution import GaussianConvolutionTool
+from .canny import CannyEdgeTool
 
 
 def build_tool_registry() -> ToolRegistry:
@@ -18,6 +19,7 @@ def build_tool_registry() -> ToolRegistry:
             ContrastStretchingTool(),
             ChannelSplitTool(),
             GaussianConvolutionTool(),
+            CannyEdgeTool(),
         ]
     )
 
