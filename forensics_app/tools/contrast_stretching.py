@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import tkinter as tk
+from tkinter import simpledialog
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -11,6 +12,8 @@ from PIL import Image
 from forensics_app.core import ImageDocument
 from .base import ForensicsTool, ToolResult
 
+LOW_PERCENTILE = 10.0
+HIGH_PERCENTILE = 90.0
 
 class ContrastStretchingTool(ForensicsTool):
 	tool_id = "contrast_stretching"
@@ -20,18 +23,17 @@ class ContrastStretchingTool(ForensicsTool):
 
 	def run(self, parent: tk.Misc, document: ImageDocument) -> ToolResult:
 		assert document.current is not None
+		# Select low percentile and high percentile instead of them be hardcoded
 		source = np.asarray(document.current.convert("RGB"))
 		stretched = source.copy()
 		channel_ranges: dict[str, str] = {}
-
 		for channel, name in enumerate(("Red", "Green", "Blue")):
 			values = source[:, :, channel]
-			minimum = int(values.min())
-			maximum = int(values.max())
+			minimum, maximum = (int(v) for v in np.percentile(values, (LOW_PERCENTILE, HIGH_PERCENTILE)))
 			channel_ranges[f"{name} input range"] = f"{minimum}–{maximum}"
 			if maximum > minimum:
 				scaled = (values.astype(np.float32) - minimum) * (255.0 / (maximum - minimum))
-				stretched[:, :, channel] = np.rint(scaled).astype(np.uint8)
+				stretched[:, :, channel] = np.rint(np.clip(scaled, 0, 255)).astype(np.uint8)
 
 		output = Image.fromarray(stretched, mode="RGB")
 		figure, axis = plt.subplots(figsize=(8, 4.5))
