@@ -7,7 +7,6 @@ from PIL import Image
 from forensics_app.core import ImageDocument
 from forensics_app.tools.convolution import (
     GaussianConvolutionTool,
-    _parse_direction,
     gaussian_convolve,
     gaussian_kernel_1d,
     gaussian_kernel_2d,
@@ -57,30 +56,23 @@ class GaussianConvolveTests(unittest.TestCase):
         self.assertEqual(result.size, (5, 4))
         self.assertEqual(result.getpixel((0, 0)), (10, 120, 200))
 
-    def test_parse_direction(self) -> None:
-        self.assertEqual(_parse_direction(""), "normal")
-        self.assertEqual(_parse_direction(" Vertical "), "vertical")
-        self.assertEqual(_parse_direction("h"), "horizontal")
-        with self.assertRaises(ValueError):
-            _parse_direction("diagonal")
-
 
 class GaussianConvolutionToolTests(unittest.TestCase):
-    @patch("forensics_app.tools.convolution.simpledialog.askfloat", return_value=1.0)
-    @patch("forensics_app.tools.convolution.simpledialog.askstring", return_value="vertical")
-    def test_returns_image_without_mutating_document(self, _ask_string, _ask_float) -> None:
+    @patch("forensics_app.tools.convolution._ask_options", return_value=("vertical", 1.0))
+    def test_returns_image_without_mutating_document(self, _ask_options) -> None:
         document = ImageDocument()
         document.current = _impulse("RGB")
         original = document.current.copy()
 
         result = GaussianConvolutionTool().run(None, document)
 
-        self.assertEqual(result.details["Direction"], "vertical")
+        self.assertEqual(result.details["Direction"], "Vertical convolution")
+        self.assertEqual(result.details["Kernel size"], "7x1")
         self.assertEqual(result.image.mode, "RGB")
         self.assertEqual(list(document.current.getdata()), list(original.getdata()))
 
-    @patch("forensics_app.tools.convolution.simpledialog.askstring", return_value=None)
-    def test_cancel_returns_none(self, _ask_string) -> None:
+    @patch("forensics_app.tools.convolution._ask_options", return_value=None)
+    def test_cancel_returns_none(self, _ask_options) -> None:
         document = ImageDocument()
         document.current = _impulse()
         self.assertIsNone(GaussianConvolutionTool().run(None, document))

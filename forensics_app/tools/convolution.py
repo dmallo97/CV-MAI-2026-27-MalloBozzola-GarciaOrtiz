@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 import tkinter as tk
-from tkinter import simpledialog
+from tkinter import messagebox, simpledialog, ttk
 
 import numpy as np
 from PIL import Image
@@ -14,16 +14,12 @@ from .base import ForensicsTool, ToolResult
 
 
 DIRECTIONS = ("normal", "horizontal", "vertical")
-
-
-def _parse_direction(raw: str) -> str:
-    cleaned = raw.strip().lower()
-    if not cleaned:
-        return "normal"
-    for direction in DIRECTIONS:
-        if direction.startswith(cleaned):
-            return direction
-    raise ValueError(f"Unknown direction '{raw}'. Use normal, horizontal, or vertical.")
+DIRECTION_LABELS = {
+    "normal": "Full convolution",
+    "horizontal": "Horizontal convolution",
+    "vertical": "Vertical convolution",
+}
+SIGMA_RANGE = (0.1, 50.0)
 
 
 def gaussian_kernel_1d(sigma: float) -> np.ndarray:
@@ -83,39 +79,71 @@ def gaussian_convolve(image: Image.Image, sigma: float = 1.0, direction: str = "
     return Image.fromarray(result)
 
 
+class ConvolutionDialog(simpledialog.Dialog):
+    """Modal dialog with direction radio buttons and a sigma spinbox."""
+
+    def __init__(self, parent: tk.Misc) -> None:
+        self.options: tuple[str, float] | None = None
+        super().__init__(parent, "Gaussian convolution")
+
+    def body(self, master: tk.Frame) -> tk.Widget:
+        self.direction = tk.StringVar(master, value="normal")
+        self.sigma = tk.StringVar(master, value="1.0")
+
+        frame = ttk.LabelFrame(master, text="Direction", padding=8)
+        frame.pack(fill="x", padx=8, pady=(8, 4))
+        buttons = [
+            ttk.Radiobutton(frame, text=DIRECTION_LABELS[name], value=name, variable=self.direction)
+            for name in DIRECTIONS
+        ]
+        for button in buttons:
+            button.pack(anchor="w")
+
+        row = ttk.Frame(master, padding=(8, 4))
+        row.pack(fill="x")
+        ttk.Label(row, text="Sigma:").pack(side="left")
+        ttk.Spinbox(
+            row,
+            from_=SIGMA_RANGE[0],
+            to=SIGMA_RANGE[1],
+            increment=0.5,
+            textvariable=self.sigma,
+            width=8,
+        ).pack(side="left", padx=(6, 0))
+        return buttons[0]
+
+    def validate(self) -> bool:
+        try:
+            sigma = float(self.sigma.get())
+        except ValueError:
+            sigma = None
+        low, high = SIGMA_RANGE
+        if sigma is None or not low <= sigma <= high:
+            messagebox.showwarning(
+                "Gaussian convolution",
+                f"Sigma must be a number between {low:g} and {high:g}.",
+                parent=self,
+            )
+            return False
+        self.options = (self.direction.get(), sigma)
+        return True
+
+
+def _ask_options(parent: tk.Misc) -> tuple[str, float] | None:
+    return ConvolutionDialog(parent).options
+
+
 class GaussianConvolutionTool(ForensicsTool):
     tool_id = "gaussian_convolution"
     title = "Gaussian convolution"
     category = "Filtering"
-    description = "Convolve the image with a Gaussian kernel (normal, horizontal, or vertical)."
+    description = "Convolve the image with a Gaussian kernel (full, horizontal, or vertical)."
 
     def run(self, parent: tk.Misc, document: ImageDocument) -> ToolResult | None:
-        raw_direction = simpledialog.askstring(
-            "Gaussian convolution",
-            "Direction (normal, horizontal, vertical):",
-            parent=parent,
-            initialvalue="normal",
-        )
-        if raw_direction is None:
+        options = _ask_options(parent)
+        if options is None:
             return None
-        try:
-            direction = _parse_direction(raw_direction)
-        except ValueError as error:
-            return ToolResult(
-                message=f"Gaussian convolution cancelled: {error}",
-                details={"Input": raw_direction, "Error": str(error)},
-            )
-
-        sigma = simpledialog.askfloat(
-            "Gaussian convolution",
-            "Sigma (standard deviation of the kernel):",
-            parent=parent,
-            initialvalue=1.0,
-            minvalue=0.1,
-            maxvalue=50.0,
-        )
-        if sigma is None:
-            return None
+        direction, sigma = options
 
         assert document.current is not None
         output = gaussian_convolve(document.current, sigma, direction)
@@ -127,10 +155,10 @@ class GaussianConvolutionTool(ForensicsTool):
         }[direction]
         return ToolResult(
             image=output,
-            message=f"Applied {direction} Gaussian convolution (sigma={sigma:g}).",
+            message=f"Applied Gaussian {DIRECTION_LABELS[direction].lower()} (sigma={sigma:g}).",
             details={
                 "Operation": "Gaussian convolution",
-                "Direction": direction,
+                "Direction": DIRECTION_LABELS[direction],
                 "Sigma": f"{sigma:g}",
                 "Kernel size": kernel_shape,
                 "Output mode": output.mode,
