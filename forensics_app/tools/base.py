@@ -29,6 +29,11 @@ class ForensicsTool(ABC):
     category = "Other"
     description = ""
     requires_image = True
+    unavailable_message = "This tool is not available yet."
+
+    def is_available(self, document: ImageDocument) -> bool:
+        """Whether the tool can run now; the sidebar disables it otherwise."""
+        return True
 
     @abstractmethod
     def run(self, parent: tk.Misc, document: ImageDocument) -> ToolResult | None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from PIL import Image
 
@@ -13,6 +14,9 @@ class ImageDocument:
     Tools receive this object, but should not mutate ``current`` directly. They
     return a new PIL image and the main window calls :meth:`apply`, preserving
     undo/redo history automatically.
+
+    ``analyses`` lets a tool keep results (e.g. detected edges) that other
+    tools can build on; it is cleared whenever a new image is loaded.
     """
 
     def __init__(self) -> None:
@@ -21,6 +25,7 @@ class ImageDocument:
         self.current: Image.Image | None = None
         self._undo: list[Image.Image] = []
         self._redo: list[Image.Image] = []
+        self.analyses: dict[str, Any] = {}
 
     @property
     def is_loaded(self) -> bool:
@@ -48,6 +53,7 @@ class ImageDocument:
         self.current = loaded
         self._undo.clear()
         self._redo.clear()
+        self.analyses.clear()
 
     def apply(self, image: Image.Image) -> None:
         if self.current is None:

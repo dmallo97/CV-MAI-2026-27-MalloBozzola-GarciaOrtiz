@@ -27,6 +27,7 @@ class MainWindow:
         self.registry = registry
         self.document = ImageDocument()
         self.status = tk.StringVar(value="Ready. Open an image to begin.")
+        self._tool_buttons: list[tuple[ForensicsTool, ttk.Button]] = []
 
         self._configure_window()
         self._build_menu()
@@ -100,8 +101,9 @@ class MainWindow:
                     command=lambda selected=tool: self.run_tool(selected),
                 )
                 button.pack(fill="x", pady=2)
-                button.bind("<Enter>", lambda _event, selected=tool: self.status.set(selected.description))
+                button.bind("<Enter>", lambda _event, selected=tool: self.status.set(self._tool_hint(selected)))
                 button.bind("<Leave>", lambda _event: self.status.set("Ready."))
+                self._tool_buttons.append((tool, button))
 
         self.image_view = ImageView(body)
         body.add(self.image_view, weight=1)
@@ -161,6 +163,9 @@ class MainWindow:
     def run_tool(self, tool: ForensicsTool) -> None:
         if tool.requires_image and not self._require_image():
             return
+        if not tool.is_available(self.document):
+            messagebox.showinfo(tool.title, tool.unavailable_message, parent=self.root)
+            return
         try:
             result = tool.run(self.root, self.document)
         except Exception as error:  # keep one student feature from crashing the shell
@@ -204,8 +209,13 @@ class MainWindow:
         self.image_view.show(self.document.current)
         self.undo_button.configure(state="normal" if self.document.can_undo else "disabled")
         self.redo_button.configure(state="normal" if self.document.can_redo else "disabled")
+        for tool, button in self._tool_buttons:
+            button.configure(state="normal" if tool.is_available(self.document) else "disabled")
         title = self.document.path.name if self.document.path else "No image"
         self.root.title(f"ForensicsApp — {title}")
+
+    def _tool_hint(self, tool: ForensicsTool) -> str:
+        return tool.description if tool.is_available(self.document) else tool.unavailable_message
 
     def _show_default_details(self) -> None:
         image = self.document.current
