@@ -8,8 +8,7 @@ from .registry import ToolRegistry
 from .histogram import HistogramVisualizationTool
 from .contrast_stretching import ContrastStretchingTool
 from .masking import MaskingTool
-from .convolution import GaussianConvolutionTool
-from .canny import CannyEdgeTool, EdgeVisualizationTool
+from .convolution import ConvolutionTool
 
 
 def build_tool_registry() -> ToolRegistry:
@@ -22,9 +21,7 @@ def build_tool_registry() -> ToolRegistry:
             ChannelSplitTool(),
             ChannelSwapTool(),
             MaskingTool(),
-            GaussianConvolutionTool(),
-            CannyEdgeTool(),
-            EdgeVisualizationTool(),
+            ConvolutionTool(),
         ]
     )
 
