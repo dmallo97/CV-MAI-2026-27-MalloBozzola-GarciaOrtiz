@@ -29,6 +29,11 @@ class ImageDocumentTests(unittest.TestCase):
         self.assertTrue(self.document.redo())
         self.assertEqual(self.document.current.getpixel((0, 0)), (0, 0, 255))
 
+    def test_load_clears_analyses(self) -> None:
+        self.document.analyses["canny"] = object()
+        self.document.load(self.source)
+        self.assertEqual(self.document.analyses, {})
+
     def test_reset_is_undoable(self) -> None:
         self.document.apply(Image.new("RGB", (8, 6), "blue"))
         self.assertTrue(self.document.reset())
