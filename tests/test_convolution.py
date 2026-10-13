@@ -6,11 +6,10 @@ from PIL import Image
 
 from forensics_app.core import ImageDocument
 from forensics_app.tools.convolution import (
-    GaussianConvolutionTool,
-    _parse_direction,
-    gaussian_convolve,
-    gaussian_kernel_1d,
-    gaussian_kernel_2d,
+    FILTERS,
+    ConvolutionTool,
+    _parse_filter,
+    convolve,
 )
 
 
@@ -20,70 +19,110 @@ def _impulse(mode: str = "L") -> Image.Image:
     return image
 
 
-class KernelTests(unittest.TestCase):
-    def test_kernels_are_normalised_and_symmetric(self) -> None:
-        kernel = gaussian_kernel_1d(1.0)
-        self.assertEqual(len(kernel), 7)
-        self.assertAlmostEqual(kernel.sum(), 1.0)
-        np.testing.assert_allclose(kernel, kernel[::-1])
-        self.assertAlmostEqual(gaussian_kernel_2d(1.0).sum(), 1.0)
-
-    def test_rejects_non_positive_sigma(self) -> None:
-        with self.assertRaises(ValueError):
-            gaussian_kernel_1d(0)
+def _vertical_edge() -> Image.Image:
+    data = np.zeros((9, 9), dtype=np.uint8)
+    data[:, 5:] = 255
+    return Image.fromarray(data)
 
 
-class GaussianConvolveTests(unittest.TestCase):
-    def test_horizontal_spreads_only_along_rows(self) -> None:
-        result = np.asarray(gaussian_convolve(_impulse(), 1.0, "horizontal"))
-        self.assertGreater(result[4, 3], 0)
-        self.assertEqual(result[3, 4], 0)
-
-    def test_vertical_spreads_only_along_columns(self) -> None:
-        result = np.asarray(gaussian_convolve(_impulse(), 1.0, "vertical"))
-        self.assertGreater(result[3, 4], 0)
-        self.assertEqual(result[4, 3], 0)
-
-    def test_normal_spreads_in_both_directions(self) -> None:
-        result = np.asarray(gaussian_convolve(_impulse(), 1.0, "normal"))
+class GaussianTests(unittest.TestCase):
+    def test_spreads_in_both_directions(self) -> None:
+        result = np.asarray(convolve(_impulse(), "gaussian", 5, 1.0))
         self.assertGreater(result[3, 4], 0)
         self.assertGreater(result[4, 3], 0)
         self.assertGreater(result[3, 3], 0)
 
-    def test_constant_image_is_unchanged_and_mode_preserved(self) -> None:
+    def test_kernel_size_limits_spread(self) -> None:
+        result = np.asarray(convolve(_impulse(), "gaussian", 3, 5.0))
+        self.assertGreater(result[3, 3], 0)
+        self.assertEqual(result[2, 4], 0)
+        self.assertEqual(result[4, 2], 0)
+
+
+class MedianTests(unittest.TestCase):
+    def test_removes_isolated_impulse(self) -> None:
+        result = np.asarray(convolve(_impulse(), "median", 3))
+        self.assertEqual(result.max(), 0)
+
+
+class EdgeFilterTests(unittest.TestCase):
+    def test_edge_filters_detect_vertical_edge(self) -> None:
+        for name in ("sobel", "prewitt", "scharr"):
+            with self.subTest(filter=name):
+                result = np.asarray(convolve(_vertical_edge(), name))
+                self.assertEqual(result[4, 4], 255)
+                self.assertEqual(result[4, 0], 0)
+
+
+class ConvolveTests(unittest.TestCase):
+    def test_constant_image_mode_preserved(self) -> None:
         image = Image.new("RGB", (5, 4), (10, 120, 200))
-        result = gaussian_convolve(image, 2.0, "normal")
-        self.assertEqual(result.mode, "RGB")
-        self.assertEqual(result.size, (5, 4))
-        self.assertEqual(result.getpixel((0, 0)), (10, 120, 200))
+        for name in ("gaussian", "median"):
+            with self.subTest(filter=name):
+                result = convolve(image, name, 5, 2.0)
+                self.assertEqual(result.mode, "RGB")
+                self.assertEqual(result.size, (5, 4))
+                self.assertEqual(result.getpixel((0, 0)), (10, 120, 200))
+        self.assertEqual(convolve(image, "sobel").getpixel((0, 0)), (0, 0, 0))
 
-    def test_parse_direction(self) -> None:
-        self.assertEqual(_parse_direction(""), "normal")
-        self.assertEqual(_parse_direction(" Vertical "), "vertical")
-        self.assertEqual(_parse_direction("h"), "horizontal")
+    def test_rejects_invalid_arguments(self) -> None:
         with self.assertRaises(ValueError):
-            _parse_direction("diagonal")
+            convolve(_impulse(), "gaussian", 4)
+        with self.assertRaises(ValueError):
+            convolve(_impulse(), "gaussian", 3, sigma=0)
+        with self.assertRaises(ValueError):
+            convolve(_impulse(), "laplace")
+
+    def test_parse_filter(self) -> None:
+        self.assertEqual(_parse_filter(""), "gaussian")
+        self.assertEqual(_parse_filter("Med"), "median")
+        self.assertEqual(_parse_filter("sc"), "scharr")
+        with self.assertRaises(ValueError):
+            _parse_filter("s")  # ambiguous: sobel or scharr
+        self.assertEqual(set(FILTERS), {"gaussian", "median", "sobel", "prewitt", "scharr"})
 
 
-class GaussianConvolutionToolTests(unittest.TestCase):
+class ConvolutionToolTests(unittest.TestCase):
     @patch("forensics_app.tools.convolution.simpledialog.askfloat", return_value=1.0)
-    @patch("forensics_app.tools.convolution.simpledialog.askstring", return_value="vertical")
-    def test_returns_image_without_mutating_document(self, _ask_string, _ask_float) -> None:
+    @patch("forensics_app.tools.convolution.simpledialog.askinteger", return_value=5)
+    @patch("forensics_app.tools.convolution.simpledialog.askstring", return_value="gaussian")
+    def test_returns_image_without_mutating_document(self, _ask_string, _ask_int, _ask_float) -> None:
         document = ImageDocument()
         document.current = _impulse("RGB")
         original = document.current.copy()
 
-        result = GaussianConvolutionTool().run(None, document)
+        result = ConvolutionTool().run(None, document)
 
-        self.assertEqual(result.details["Direction"], "vertical")
+        self.assertEqual(result.details["Filter"], "gaussian")
+        self.assertEqual(result.details["Kernel size"], "5x5")
+        self.assertEqual(result.details["Sigma"], "1")
         self.assertEqual(result.image.mode, "RGB")
         self.assertEqual(list(document.current.getdata()), list(original.getdata()))
+
+    @patch("forensics_app.tools.convolution.simpledialog.askinteger")
+    @patch("forensics_app.tools.convolution.simpledialog.askstring", return_value="sobel")
+    def test_edge_filter_skips_kernel_size_prompt(self, _ask_string, ask_int) -> None:
+        document = ImageDocument()
+        document.current = _vertical_edge()
+        result = ConvolutionTool().run(None, document)
+        ask_int.assert_not_called()
+        self.assertEqual(result.details["Kernel size"], "3x3")
+        self.assertNotIn("Sigma", result.details)
+
+    @patch("forensics_app.tools.convolution.simpledialog.askinteger", return_value=4)
+    @patch("forensics_app.tools.convolution.simpledialog.askstring", return_value="median")
+    def test_even_kernel_size_is_rejected(self, _ask_string, _ask_int) -> None:
+        document = ImageDocument()
+        document.current = _impulse()
+        result = ConvolutionTool().run(None, document)
+        self.assertIsNone(result.image)
+        self.assertIn("odd", result.message)
 
     @patch("forensics_app.tools.convolution.simpledialog.askstring", return_value=None)
     def test_cancel_returns_none(self, _ask_string) -> None:
         document = ImageDocument()
         document.current = _impulse()
-        self.assertIsNone(GaussianConvolutionTool().run(None, document))
+        self.assertIsNone(ConvolutionTool().run(None, document))
 
 
 if __name__ == "__main__":
