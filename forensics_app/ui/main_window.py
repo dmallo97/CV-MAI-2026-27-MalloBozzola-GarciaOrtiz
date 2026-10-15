@@ -12,6 +12,7 @@ from forensics_app.core import ImageDocument
 from forensics_app.tools.base import ForensicsTool
 from forensics_app.tools.registry import ToolRegistry
 from .image_view import ImageView
+from .widgets import CollapsibleSection, ScrollableFrame
 
 
 OPEN_TYPES = [
@@ -28,6 +29,7 @@ class MainWindow:
         self.document = ImageDocument()
         self.status = tk.StringVar(value="Ready. Open an image to begin.")
         self._tool_buttons: list[tuple[ForensicsTool, ttk.Button]] = []
+        self._tool_menu_entries: list[tuple[ForensicsTool, tk.Menu, int]] = []
 
         self._configure_window()
         self._build_menu()
@@ -43,8 +45,17 @@ class MainWindow:
         if "clam" in style.theme_names():
             style.theme_use("clam")
         style.configure("Sidebar.TFrame", background="#eef1f5")
-        style.configure("Category.TLabel", background="#eef1f5", font=("TkDefaultFont", 10, "bold"))
         style.configure("Tool.TButton", anchor="w", padding=(10, 7))
+        style.configure(
+            "Section.TButton",
+            anchor="w",
+            padding=(4, 6),
+            relief="flat",
+            borderwidth=0,
+            background="#eef1f5",
+            font=("TkDefaultFont", 10, "bold"),
+        )
+        style.map("Section.TButton", background=[("active", "#dde3ea"), ("pressed", "#d0d7e0")])
         style.configure("Title.TLabel", font=("TkDefaultFont", 16, "bold"))
 
     def _build_menu(self) -> None:
@@ -54,18 +65,61 @@ class MainWindow:
         file_menu.add_command(label="Save result as…", command=self.save_image, accelerator="Ctrl+Shift+S")
         file_menu.add_separator()
         file_menu.add_command(label="Exit", command=self.root.destroy)
-        menu.add_cascade(label="File", menu=file_menu)
+        menu.add_cascade(label="File", menu=file_menu, underline=0)
 
         edit_menu = tk.Menu(menu, tearoff=False)
         edit_menu.add_command(label="Undo", command=self.undo, accelerator="Ctrl+Z")
         edit_menu.add_command(label="Redo", command=self.redo, accelerator="Ctrl+Y")
         edit_menu.add_command(label="Reset to original", command=self.reset)
-        menu.add_cascade(label="Edit", menu=edit_menu)
+        menu.add_cascade(label="Edit", menu=edit_menu, underline=0)
+
+        menu.add_cascade(label="Tools", menu=self._build_tools_menu(menu), underline=0)
 
         help_menu = tk.Menu(menu, tearoff=False)
         help_menu.add_command(label="About", command=self.show_about)
-        menu.add_cascade(label="Help", menu=help_menu)
+        menu.add_cascade(label="Help", menu=help_menu, underline=0)
         self.root.configure(menu=menu)
+
+    def _build_tools_menu(self, menubar: tk.Menu) -> tk.Menu:
+        tools_menu = tk.Menu(menubar, tearoff=False)
+        for category, tools in self.registry.categories():
+            submenu = tk.Menu(tools_menu, tearoff=False)
+            for tool in tools:
+                submenu.add_command(label=tool.title, command=lambda selected=tool: self.run_tool(selected))
+                self._tool_menu_entries.append((tool, submenu, submenu.index("end")))
+            tools_menu.add_cascade(label=category, menu=submenu)
+        return tools_menu
+
+    def _build_sidebar(self, parent: ttk.Panedwindow) -> ttk.Frame:
+        sidebar = ttk.Frame(parent, style="Sidebar.TFrame", padding=12, width=235)
+        sidebar.pack_propagate(False)
+        ttk.Label(sidebar, text="Forensics tools", style="Title.TLabel", background="#eef1f5").pack(
+            anchor="w", pady=(0, 8)
+        )
+        scroller = ScrollableFrame(sidebar, style="Sidebar.TFrame")
+        scroller.pack(fill="both", expand=True)
+        for category, tools in self.registry.categories():
+            section = CollapsibleSection(
+                scroller.content,
+                category,
+                expanded=True,
+                style="Sidebar.TFrame",
+                header_style="Section.TButton",
+            )
+            section.set_count(len(tools))
+            section.pack(fill="x", pady=(4, 0))
+            for tool in tools:
+                button = ttk.Button(
+                    section.body,
+                    text=tool.title,
+                    style="Tool.TButton",
+                    command=lambda selected=tool: self.run_tool(selected),
+                )
+                button.pack(fill="x", padx=(12, 0), pady=2)
+                button.bind("<Enter>", lambda _event, selected=tool: self.status.set(self._tool_hint(selected)))
+                button.bind("<Leave>", lambda _event: self.status.set("Ready."))
+                self._tool_buttons.append((tool, button))
+        return sidebar
 
     def _build_layout(self) -> None:
         container = ttk.Frame(self.root)
@@ -85,25 +139,7 @@ class MainWindow:
         body = ttk.Panedwindow(container, orient="horizontal")
         body.pack(fill="both", expand=True)
 
-        sidebar = ttk.Frame(body, style="Sidebar.TFrame", padding=12, width=235)
-        sidebar.pack_propagate(False)
-        body.add(sidebar, weight=0)
-        ttk.Label(sidebar, text="Forensics tools", style="Title.TLabel", background="#eef1f5").pack(
-            anchor="w", pady=(0, 12)
-        )
-        for category, tools in self.registry.categories():
-            ttk.Label(sidebar, text=category, style="Category.TLabel").pack(anchor="w", pady=(9, 4))
-            for tool in tools:
-                button = ttk.Button(
-                    sidebar,
-                    text=tool.title,
-                    style="Tool.TButton",
-                    command=lambda selected=tool: self.run_tool(selected),
-                )
-                button.pack(fill="x", pady=2)
-                button.bind("<Enter>", lambda _event, selected=tool: self.status.set(self._tool_hint(selected)))
-                button.bind("<Leave>", lambda _event: self.status.set("Ready."))
-                self._tool_buttons.append((tool, button))
+        body.add(self._build_sidebar(body), weight=0)
 
         self.image_view = ImageView(body)
         body.add(self.image_view, weight=1)
@@ -211,6 +247,8 @@ class MainWindow:
         self.redo_button.configure(state="normal" if self.document.can_redo else "disabled")
         for tool, button in self._tool_buttons:
             button.configure(state="normal" if tool.is_available(self.document) else "disabled")
+        for tool, menu, index in self._tool_menu_entries:
+            menu.entryconfigure(index, state="normal" if tool.is_available(self.document) else "disabled")
         title = self.document.path.name if self.document.path else "No image"
         self.root.title(f"ForensicsApp — {title}")
 
