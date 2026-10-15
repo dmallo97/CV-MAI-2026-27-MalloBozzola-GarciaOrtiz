@@ -9,6 +9,7 @@ from .histogram import HistogramVisualizationTool
 from .contrast_stretching import ContrastStretchingTool
 from .masking import MaskingTool
 from .convolution import ConvolutionTool
+from .sharp import SharpeningTool
 
 
 def build_tool_registry() -> ToolRegistry:
@@ -22,6 +23,7 @@ def build_tool_registry() -> ToolRegistry:
             ChannelSwapTool(),
             MaskingTool(),
             ConvolutionTool(),
+            SharpeningTool(),
         ]
     )
 
