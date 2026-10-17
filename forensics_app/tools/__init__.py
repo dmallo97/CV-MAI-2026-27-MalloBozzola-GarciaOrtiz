@@ -11,6 +11,7 @@ from .masking import MaskingTool
 from .canny import CannyEdgeTool, EdgeVisualizationTool
 from .convolution import ConvolutionTool
 from .sharp import SharpeningTool
+from .cross_correlation import CrossCorrelationTool, TemplateMatchThresholdTool
 
 
 def build_tool_registry() -> ToolRegistry:
@@ -27,6 +28,8 @@ def build_tool_registry() -> ToolRegistry:
             CannyEdgeTool(),
             EdgeVisualizationTool(),
             SharpeningTool(),
+            CrossCorrelationTool(),
+            TemplateMatchThresholdTool(),
         ]
     )
 
