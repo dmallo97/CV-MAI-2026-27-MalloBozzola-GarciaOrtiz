@@ -69,15 +69,20 @@ def convolve(
     data = np.asarray(image, dtype=np.float64) / 255.0
     if data.ndim == 2:
         data = data[:, :, np.newaxis]
+    # Filter only the colour channels: an opaque alpha has zero gradient, so
+    # edge operators would otherwise make the whole result transparent.
+    color_channels = 3 if image.mode == "RGBA" else data.shape[2]
 
     output = np.stack(
-        [_filter_channel(data[:, :, c], filter_name, size, sigma) for c in range(data.shape[2])],
+        [_filter_channel(data[:, :, c], filter_name, size, sigma) for c in range(color_channels)],
         axis=2,
     )
     if filter_name in EDGE_FILTERS:
         peak = output.max()
         # Ignore float round-off on flat images so it is not stretched to full white.
         output = output / peak if peak > 1e-6 else np.zeros_like(output)
+    if color_channels < data.shape[2]:
+        output = np.concatenate([output, data[:, :, color_channels:]], axis=2)
 
     result = np.clip(np.rint(output * 255.0), 0, 255).astype(np.uint8)
     if image.mode == "L":

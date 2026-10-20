@@ -65,6 +65,14 @@ class ConvolveTests(unittest.TestCase):
                 self.assertEqual(result.getpixel((0, 0)), (10, 120, 200))
         self.assertEqual(convolve(image, "sobel").getpixel((0, 0)), (0, 0, 0))
 
+    def test_rgba_alpha_preserved(self) -> None:
+        image = _vertical_edge().convert("RGBA")
+        for name in FILTERS:
+            with self.subTest(filter=name):
+                result = np.asarray(convolve(image, name))
+                self.assertTrue((result[:, :, 3] == 255).all())
+        self.assertEqual(np.asarray(convolve(image, "sobel"))[4, 4, 0], 255)
+
     def test_rejects_invalid_arguments(self) -> None:
         with self.assertRaises(ValueError):
             convolve(_impulse(), "gaussian", 4)
