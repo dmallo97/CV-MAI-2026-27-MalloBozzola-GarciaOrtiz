@@ -12,6 +12,7 @@ from .canny import CannyEdgeTool, EdgeVisualizationTool
 from .convolution import ConvolutionTool
 from .sharp import SharpeningTool
 from .cross_correlation import CrossCorrelationTool, TemplateMatchThresholdTool
+from .hog import HogPersonDetectionTool, HogTool
 from .feature_matching import FeatureMatchingTool
 
 
@@ -31,6 +32,8 @@ def build_tool_registry() -> ToolRegistry:
             SharpeningTool(),
             CrossCorrelationTool(),
             TemplateMatchThresholdTool(),
+            HogTool(),
+            HogPersonDetectionTool(),
             FeatureMatchingTool(),
         ]
     )
