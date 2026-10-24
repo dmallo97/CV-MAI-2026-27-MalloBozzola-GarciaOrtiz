@@ -1,16 +1,11 @@
-"""Histogram of Oriented Gradients (HOG) extraction, visualization and person detection."""
-
 from __future__ import annotations
-
 from dataclasses import dataclass
 from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
-
 import numpy as np
 from PIL import Image, ImageDraw
 from skimage import exposure, feature, img_as_float, img_as_ubyte
-
 from forensics_app.core import ImageDocument
 from .base import ForensicsTool, ToolResult
 from .cross_correlation import TEMPLATE_FILE_TYPES, show_template_window
@@ -35,7 +30,6 @@ def compute_hog(
     pixels_per_cell: int = DEFAULT_PIXELS_PER_CELL,
     cells_per_block: int = DEFAULT_CELLS_PER_BLOCK,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Return the HOG feature vector and its visualization (same size as the image)."""
     if image.mode == "L":
         pixels, channel_axis = img_as_float(np.asarray(image)), None
     else:
@@ -57,8 +51,6 @@ def hog_to_image(hog_image: np.ndarray) -> Image.Image:
 
 @dataclass(frozen=True)
 class Detection:
-    """Best window found by one similarity measure."""
-
     x: int
     y: int
     score: float
@@ -67,7 +59,6 @@ class Detection:
 def sliding_windows(
     image_size: tuple[int, int], window_size: tuple[int, int], step: int
 ) -> list[tuple[int, int]]:
-    """Top-left (x, y) corners of every window that fits inside the image, both sizes as (w, h)."""
     (width, height), (window_w, window_h) = image_size, window_size
     if window_w > width or window_h > height:
         raise ValueError("The person template must not be larger than the image.")
@@ -88,15 +79,9 @@ def detect_person(
     pixels_per_cell: int = DETECTION_PIXELS_PER_CELL,
     cells_per_block: int = DETECTION_CELLS_PER_BLOCK,
 ) -> tuple[Detection, Detection, int]:
-    """Slide a template-sized window over the image comparing HOG descriptors.
-
-    Return the window with the smallest Euclidean distance, the one with the
-    largest dot product, and how many windows were evaluated.
-    """
     image, template = image.convert("RGB"), template.convert("RGB")
     corners = sliding_windows(image.size, template.size, step)
     template_fd, _ = compute_hog(template, orientations, pixels_per_cell, cells_per_block)
-
     euclidean, dot_product = [], []
     for x, y in corners:
         window = image.crop((x, y, x + template.width, y + template.height))
@@ -115,7 +100,6 @@ def detect_person(
 def draw_detections(
     image: Image.Image, window_size: tuple[int, int], euclidean: Detection, dot_product: Detection
 ) -> Image.Image:
-    """Copy of the image with the Euclidean (red) and dot product (blue) boxes."""
     output = image.convert("RGB")
     draw = ImageDraw.Draw(output)
     width, height = window_size
@@ -126,8 +110,6 @@ def draw_detections(
 
 
 class HogDialog(simpledialog.Dialog):
-    """Modal dialog asking for integer HOG parameters."""
-
     FIELDS = (
         ("Orientations:", DEFAULT_ORIENTATIONS),
         ("Pixels per cell:", DEFAULT_PIXELS_PER_CELL),
