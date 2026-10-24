@@ -1,16 +1,26 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from pathlib import Path
 import tkinter as tk
-from tkinter import simpledialog, filedialog
+from tkinter import filedialog
 
 import numpy as np
 from PIL import Image, ImageTk
-from skimage import color, feature, img_as_float, img_as_ubyte, transform
+from skimage import color, feature, img_as_float, img_as_ubyte, measure, transform
 
 from forensics_app.core import ImageDocument
 from .base import ForensicsTool, ToolResult
+from .template_dialogs import(
+    MAX_PREVIEW_SIZE,
+    SOURCE_FILE,
+    Box,
+    ask_angle,
+    ask_region, 
+    ask_template_source,
+    ask_threshold,
+)
 
 ANALYSIS_KEY = "cross_correlation"
 NO_NCC_MESSAGE = "No correlation map yet. Run normalized cross-correlation first."
@@ -23,6 +33,8 @@ TEMPLATE_FILE_TYPES = [
 ]
 # Small templates are enlarged (nearest neighbour) so they stay visible in the preview window.
 TEMPLATE_PREVIEW_MIN_SIDE = 160
+DEFAULT_THRESHOLD = 0.9
+THRESHOLD_MARGIN = 0.05
 # The single preview window shared by the template matching tools (None while closed).
 _template_window: tk.Toplevel | None = None
 
@@ -49,6 +61,15 @@ def load_template(path: str | Path) -> np.ndarray:
     """Read an image file as a 2-D float template in [0, 1]."""
     with Image.open(path) as image:
         return to_gray_float(image)
+    
+    
+def crop_template(image:np.ndarray, box: Box) -> np.ndarray:
+    """Cut the (left, tip, right, bottom) region out of a 2-D image."""
+    left, top, right, bottom = box
+    height, width = image.shape[:2]
+    if not (0 <= left < right <= width and 0 <= top < bottom < height):
+        raise ValueError(f"Invalid region {box} for an image of {width}x{height} pixels.")
+    return image[top:bottom, left:right].copy()
 
 
 def rotate_template(template: np.ndarray, angle: float) -> np.ndarray:
@@ -85,15 +106,49 @@ def threshold_matches(correlation: np.ndarray, threshold: float) -> np.ndarray:
     return correlation >= threshold
 
 
+def default_threshold(correlation: np.ndarray) -> float:
+    """Start at DEFAULT_THRESHOLD, ot just below the peak when the peak is lower."""
+    peak = float(correlation.max())
+    return round(max(-1.0, min(DEFAULT_THRESHOLD, peak - THRESHOLD_MARGIN)), 2)
+
+def count_regions(matches: np.ndarray) -> int:
+    """Number of connected blobs (8-connectivity) in a boolean mask."""
+    return int(measure.label(matches, connectivity=2).max())
+
+def preview_factor(shape: tuple[int, int], max_size: tuple[int, int]) -> int:
+    """Integer downscale factor so an array of `shape`(H, W) fits in max_size (W, H)"""
+    height, width = shape
+    max_height, max_width = max_size
+    return max(1, math.ceil(max(width / max_width, height / max_height)))
+
+  
+def downscale_mean(image: np.ndarray, factor: int) -> np.ndarray:
+    """Shrink a 2D float image by averaging factor x factor blocks."""
+    if factor == 1:
+        return Image
+    return measure.block_reduce(image, (factor, factor), np.mean)
+    
+    
+def downscale_any(mask: np.ndarray, factor: int) -> np.ndarray:
+    """Shrink a boolean mask keeping a block True if ANY of its pixels is True
+    
+    Averaging would make isolated matches (a single bright NCC peak) dissapear."""
+    if factor == 1:
+        return mask
+    return measure.block_reduce(mask, (factor, factor), np.max).astype(bool)
+    
 def overlay_matches(image: Image.Image, matches: np.ndarray) -> Image.Image:
     """Dimmed grayscale image with matching pixels marked in red."""
-    gray = to_gray_float(image)
+    return render_overlay(to_gray_float(image), matches)
+    
+    
+def render_overlay(gray:np.ndarray, matches: np.ndarray) -> Image.Image:
+    """overlay_matches from a 2D float array in [0, 1]."""
     if gray.shape != matches.shape:
         raise ValueError("The match mask must have the same shape as the image.")
     dimmed = color.gray2rgb(gray) * DIM_FACTOR
     dimmed[matches] = [1.0, 0.0, 0.0]
     return Image.fromarray(img_as_ubyte(dimmed), mode="RGB")
-
 
 def template_preview(template: np.ndarray) -> Image.Image:
     """Grayscale PIL image of the template, enlarged if it is very small."""
@@ -140,30 +195,26 @@ class CrossCorrelationTool(ForensicsTool):
     title = "Normalized cross-correlation"
     category = "Template matching"
     description = (
-        "Load an external image file as template, optionally rotate it, and show "
-        "the normalized cross-correlation map (bright = good match)."
+        "Load a template from a file or select it on the image, rotate it with a dial, "
+        "and show the normalized cross-correlation map (bright = good match)."
     )
 
     def run(self, parent: tk.Misc, document: ImageDocument) -> ToolResult | None:
         assert document.current is not None
         gray = to_gray_float(document.current)
-
-        filename = filedialog.askopenfilename(
-            title="Open template image", filetypes=TEMPLATE_FILE_TYPES, parent=parent
-        )
-        if not filename:  # the dialog returns "" (or ()) when cancelled
+        
+        source = ask_template_source(parent)
+        if source is None:
             return None
-        template = load_template(filename)
-        template_source = Path(filename).name
-
-        angle = simpledialog.askfloat(
-            "Normalized cross-correlation",
-            "Template rotation angle (degrees, counter-clockwise):",
-            parent=parent,
-            initialvalue=0.0,
-            minvalue=0.0,
-            maxvalue=360.0,
-        )
+        if source == SOURCE_FILE:
+            picked = self._template_from_file(parent)
+        else:
+            picked = self._template_from_selection(parent, document.current, gray)
+        if picked is None:
+            return None
+        template, template_source = picked
+        
+        angle = ask_angle(parent, lambda value: template_preview(rotate_template(template, value)))
         if angle is None:
             return None
 
@@ -186,13 +237,33 @@ class CrossCorrelationTool(ForensicsTool):
                 **_peak_details(correlation),
             },
         )
+        
+    @staticmethod
+    def _template_from_file(parent: tk.Misc) -> tuple[np.ndarray, str] | None:
+        filename = filedialog.askopenfilename(
+            title="Open template image",
+            filetypes=TEMPLATE_FILE_TYPES, parent=parent
+        )
+        if not filename:
+            return None
+        return load_template(filename), Path(filename).name
+    
+    @staticmethod
+    def _template_from_selection(parent: tk.Misc, image: Image.Image, gray: np.ndarray) -> tuple[np.ndarray, str] | None:
+        box = ask_region(parent, image)
+        if box is None:
+            return None
+        left, top, right, bottom = box
+        name = f"region ({left}, {top}) {right - left}x{bottom - top}"
+        return crop_template(gray, box), name
 
 
 class TemplateMatchThresholdTool(ForensicsTool):
     tool_id = "template_match_threshold"
     title = "Thresholded matches"
     category = "Template matching"
-    description = "Mark in red, over the dimmed image, the pixels whose correlation reaches a threshold."
+    description = ("Move a slider to mark in red, live over the dimmed image, the pixels whose "
+        "correlation reaches the threshold.")
     unavailable_message = NO_NCC_MESSAGE
 
     def is_available(self, document: ImageDocument) -> bool:
@@ -203,22 +274,25 @@ class TemplateMatchThresholdTool(ForensicsTool):
         if result is None:
             return ToolResult(message=NO_NCC_MESSAGE)
 
-        threshold = simpledialog.askfloat(
-            "Thresholded matches",
-            "Correlation threshold (-1 to 1):",
-            parent=parent,
-            initialvalue=0.9,
-            minvalue=-1.0,
-            maxvalue=1.0,
-        )
-        if threshold is None:
-            return None
-
-        matches = threshold_matches(result.correlation, threshold)
         show_template_window(
             parent, result.template, f"{result.template_source} rotated {result.angle:g} deg"
         )
+        gray = to_gray_float(result.source)
+        factor = preview_factor(gray.shape, MAX_PREVIEW_SIZE)
+        preview_gray = downscale_mean(gray, factor) # computed once, reuse on every move
+        
+        def render_preview(value: float) -> tuple[Image.Image, str]:
+            # Threshold at full resolution, then shrink only the result for display.
+            full_matches = threshold_matches(result.correlation, value)
+            preview = render_overlay(preview_gray, downscale_any(full_matches, factor))
+            return preview, f"{int(full_matches.sum()):,} matching pixels"
+        
+        threshold = ask_threshold(parent, render_preview, default_threshold(result.correlation))
+        if threshold is None:
+            return None
+        matches = threshold_matches(result.correlation, threshold)
         match_count = int(matches.sum())
+        
         return ToolResult(
             image=overlay_matches(result.source, matches),
             message=f"{match_count:,} pixels with correlation >= {threshold:g}.",
@@ -229,5 +303,7 @@ class TemplateMatchThresholdTool(ForensicsTool):
                 "Threshold": f"{threshold:g}",
                 "Matching pixels": f"{match_count:,}",
                 **_peak_details(result.correlation),
+                "Match regions": str(count_regions(matches)),
             },
         )
+    
