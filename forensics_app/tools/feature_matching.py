@@ -15,6 +15,14 @@ from skimage.feature import ORB, SIFT, match_descriptors, plot_matched_features
 
 from forensics_app.core import ImageDocument
 from .base import ForensicsTool, ToolResult
+from .geometric_verification import (
+    DEFAULT_MIN_INLIERS,
+    DEFAULT_MODEL,
+    DEFAULT_RESIDUAL_THRESHOLD,
+    MIN_SAMPLES,
+    MODELS,
+    RansacParams,
+)
 
 DIALOG_TITLE = "Feature Matching"
 METHODS = ("orb", "sift") # ORB -> bit strings; Hamming / SIFT -> hisograms; Euclidean
@@ -31,6 +39,9 @@ IMAGE_FILE_TYPES = [
 ]
 FIGURE_SIZE = (10.0, 5.0)
 FIGURE_DPI = 100
+
+INLIER_COLOR = "lime"
+OUTLIER_COLOR = "red"
 
 @dataclass(frozen = True)
 class FeatureParams:
@@ -113,16 +124,34 @@ def draw_matches(
         keypoints2: np.ndarray,
         matches: np.ndarray,
         title: str = "",
+        inliers: np.ndarray | None = None,
 ) -> Image.Image:
-    """Render both images side by side with keypoints and match lines as an RGB image."""
+    """Render both images side by side with keypoints and match lines as an RGB image.
+    
+    If `inliers` (bool mask, one flag per match) is given, inlier matches are drawn in green and outliers in red;
+    otherwise every match gets a random color.
+    """
     figure = Figure(figsize=FIGURE_SIZE, dpi=FIGURE_DPI)
     canvas = FigureCanvasAgg(figure)
     axis = figure.add_subplot()
-    plot_matched_features(
-        gray1, gray2,
-        keypoints0=keypoints1, keypoints1=keypoints2, matches=matches,
-        ax=axis, keypoints_color="r",
-    )   
+    if inliers is None:
+        plot_matched_features(
+            gray1, gray2,
+            keypoints0=keypoints1, keypoints1=keypoints2, matches=matches,
+            ax=axis, keypoints_color="r",
+        )
+    else: 
+        plot_matched_features(
+            gray1, gray2,
+            keypoints0=keypoints1, keypoints1 = keypoints2, matches=matches[~inliers],
+            ax=axis, keypoints_color="r", matches_color=OUTLIER_COLOR,
+        )
+        # Second pass only adds inlier lines, so they end up on top of the outliers.
+        plot_matched_features(
+            gray1, gray2,
+            keypoints0=keypoints1, keypoints1 = keypoints2, matches=matches[inliers],
+            ax=axis, matches_color=INLIER_COLOR, only_matches=True,
+        )
     axis.set_title(title)
     axis.axis("off")
     figure.tight_layout()
@@ -197,6 +226,23 @@ def ask_matching_params(parent: tk.Misc) -> tuple[float, bool] | None:
     )
     return max_ratio, bool(cross_check)
 
+def ask_ransac_params(parent: tk.Misc) -> RansacParams | None:
+    """Ask for the RANSAC model, residual threshold and min inliers; ``None`` if cancelled."""   
+    model = simpledialog.askstring(DIALOG_TITLE, "Geometric model (homography / fundamental):", parent=parent, initialvalue=DEFAULT_MODEL)
+    if model is None:
+        return None
+    model = model.strip().lower()
+    if model not in MODELS:
+        raise ValueError(f"Unknown model '{model}'. Use one of: {', '.join(MODELS)}.")
+    residual_threshold = simpledialog.askfloat(DIALOG_TITLE, "Residual threshold in pixels (max reprojection error of an inlier):", parent=parent, initialvalue=DEFAULT_RESIDUAL_THRESHOLD, minvalue=0.1)
+    if residual_threshold is None:
+        return None
+    min_inliers = simpledialog.askinteger(DIALOG_TITLE, "Min inliers to trust the model:", parent=parent, initialvalue=max(DEFAULT_MIN_INLIERS, MIN_SAMPLES[model]), minvalue=MIN_SAMPLES[model])
+    if min_inliers is None:
+        return None
+    return RansacParams(model, residual_threshold=residual_threshold, min_inliers=min_inliers)
+
+
 # ---------- Tool ----------
 class FeatureMatchingTool(ForensicsTool):
     tool_id = "feature_matching"
@@ -219,6 +265,8 @@ class FeatureMatchingTool(ForensicsTool):
         if params is None:
             return None
         matching = ask_matching_params(parent)
+        if matching is None:
+            return None
         max_ratio, cross_check = matching
 
         gray1 = to_gray_float(document.current)

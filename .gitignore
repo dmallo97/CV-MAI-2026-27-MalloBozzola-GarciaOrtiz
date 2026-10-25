@@ -11,6 +11,7 @@ dist/
 outputs/
 models/
 datasets/
+notes/
 
 # Claude Code
 .claude/
