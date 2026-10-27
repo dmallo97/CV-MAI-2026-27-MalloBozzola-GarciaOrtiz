@@ -13,7 +13,8 @@ from .convolution import ConvolutionTool
 from .sharp import SharpeningTool
 from .cross_correlation import CrossCorrelationTool, TemplateMatchThresholdTool
 from .hog import HogPersonDetectionTool, HogTool
-from .feature_matching import FeatureMatchingTool
+from .corners import CornerDetectionTool
+from .feature_matching import FeatureMatchingTool, KeypointsTool
 from .image_lookup import ImageLookupTool
 
 
@@ -36,6 +37,8 @@ def build_tool_registry() -> ToolRegistry:
             TemplateMatchThresholdTool(),
             HogTool(),
             HogPersonDetectionTool(),
+            CornerDetectionTool(),
+            KeypointsTool(),
             FeatureMatchingTool(),
             ImageLookupTool()
         ]
