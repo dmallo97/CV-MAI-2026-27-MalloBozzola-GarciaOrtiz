@@ -15,6 +15,7 @@ from skimage.feature import ORB, SIFT, match_descriptors, plot_matched_features
 
 from forensics_app.core import ImageDocument
 from .base import ForensicsTool, ToolResult
+from .corners import draw_corners
 from .geometric_verification import (
     DEFAULT_MIN_INLIERS,
     DEFAULT_MODEL,
@@ -243,7 +244,31 @@ def ask_ransac_params(parent: tk.Misc) -> RansacParams | None:
     return RansacParams(model, residual_threshold=residual_threshold, min_inliers=min_inliers)
 
 
-# ---------- Tool ----------
+# ---------- Tools ----------
+class KeypointsTool(ForensicsTool):
+    tool_id = "keypoints"
+    title = "Keypoints (ORB / SIFT)"
+    category = "Features"
+    description = "Detect ORB or SIFT keypoints in the current image, compute their descriptors and draw them."
+
+    def run(self, parent: tk.Misc, document: ImageDocument) -> ToolResult | None:
+        params = ask_feature_params(parent)
+        if params is None:
+            return None
+
+        assert document.current is not None
+        keypoints, descriptors = extract_features(to_gray_float(document.current), params)
+        return ToolResult(
+            image=draw_corners(document.current, keypoints),
+            message=f"Extracted {len(keypoints)} {params.method.upper()} keypoints.",
+            details={"Operation": "Keypoint extraction",
+                     **describe_params(params),
+                     "Keypoints": str(len(keypoints)),
+                     "Descriptor length": str(descriptors.shape[1]),
+                     },
+        )
+
+
 class FeatureMatchingTool(ForensicsTool):
     tool_id = "feature_matching"
     title = "Match with second image"
