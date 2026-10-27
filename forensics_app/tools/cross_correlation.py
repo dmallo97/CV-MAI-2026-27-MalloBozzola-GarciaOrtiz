@@ -67,7 +67,7 @@ def crop_template(image:np.ndarray, box: Box) -> np.ndarray:
     """Cut the (left, tip, right, bottom) region out of a 2-D image."""
     left, top, right, bottom = box
     height, width = image.shape[:2]
-    if not (0 <= left < right <= width and 0 <= top < bottom < height):
+    if not (0 <= left < right <= width and 0 <= top < bottom <= height):
         raise ValueError(f"Invalid region {box} for an image of {width}x{height} pixels.")
     return image[top:bottom, left:right].copy()
 
@@ -125,7 +125,7 @@ def preview_factor(shape: tuple[int, int], max_size: tuple[int, int]) -> int:
 def downscale_mean(image: np.ndarray, factor: int) -> np.ndarray:
     """Shrink a 2D float image by averaging factor x factor blocks."""
     if factor == 1:
-        return Image
+        return image
     return measure.block_reduce(image, (factor, factor), np.mean)
     
     
