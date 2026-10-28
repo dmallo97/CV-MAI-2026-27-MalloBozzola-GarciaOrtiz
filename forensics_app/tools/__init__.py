@@ -16,6 +16,8 @@ from .hog import HogPersonDetectionTool, HogTool
 from .corners import CornerDetectionTool
 from .feature_matching import FeatureMatchingTool, KeypointsTool
 from .image_lookup import ImageLookupTool
+from .face_detection import FaceDetectionTool, WebcamFaceDetectionTool
+from .eigenfaces_1s import EigenfaceBuilderTool
 
 
 
@@ -40,7 +42,10 @@ def build_tool_registry() -> ToolRegistry:
             CornerDetectionTool(),
             KeypointsTool(),
             FeatureMatchingTool(),
-            ImageLookupTool()
+            ImageLookupTool(),
+            FaceDetectionTool(),
+            WebcamFaceDetectionTool(),
+            EigenfaceBuilderTool(),
         ]
     )
 
