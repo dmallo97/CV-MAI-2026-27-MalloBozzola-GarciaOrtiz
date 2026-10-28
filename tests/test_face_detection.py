@@ -5,7 +5,7 @@ import numpy as np
 from PIL import Image
 
 from forensics_app.core import ImageDocument
-from forensics_app.tools.face_detection_1 import (
+from forensics_app.tools.face_detection import (
     BOX_COLOR,
     Face,
     FaceDetectionTool,
