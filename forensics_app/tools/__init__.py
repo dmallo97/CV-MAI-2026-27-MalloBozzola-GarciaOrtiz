@@ -18,6 +18,7 @@ from .feature_matching import FeatureMatchingTool, KeypointsTool
 from .image_lookup import ImageLookupTool
 from .face_detection import FaceDetectionTool, WebcamFaceDetectionTool
 from .eigenfaces import EigenfaceBuilderTool
+from .codebook import CodebookTool
 
 
 
@@ -46,6 +47,7 @@ def build_tool_registry() -> ToolRegistry:
             FaceDetectionTool(),
             WebcamFaceDetectionTool(),
             EigenfaceBuilderTool(),
+            CodebookTool(),
         ]
     )
 
