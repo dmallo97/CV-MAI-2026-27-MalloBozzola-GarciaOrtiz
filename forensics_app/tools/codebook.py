@@ -11,8 +11,12 @@ from sklearn.cluster import MiniBatchKMeans
 
 from forensics_app.core import ImageDocument
 from .base import ForensicsTool, ToolResult
-from .feature_matching import IMAGE_FILE_TYPES, ask_feature_params, describe_params, extract_features, load_gray
+from .feature_matching import (
+    IMAGE_FILE_TYPES, FeatureParams, ask_feature_params, describe_params, extract_features, load_gray,
+)
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+CODEBOOK_FILE = PROJECT_ROOT / "models" / "codebook.npz"
 DIALOG_TITLE = "Construct Codebook"
 IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp")
 WORDS_PER_CLASS = 10  # K = 10 * num_classes
@@ -41,6 +45,33 @@ def build_codebook(feature_descriptors: list[np.ndarray], n_clusters: int) -> tu
     descriptors = descriptors.astype(float)  # ORB descriptors are bool
     kmeans = MiniBatchKMeans(n_clusters=n_clusters, random_state=0).fit(descriptors)
     return kmeans, descriptors
+
+
+def save_codebook(kmeans: MiniBatchKMeans, params: FeatureParams, path: Path = CODEBOOK_FILE) -> Path:
+    """Save the centres, the word of every codebook descriptor and the descriptor settings."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez(
+        path,
+        centers=kmeans.cluster_centers_,  # (K, D) the visual words
+        words=kmeans.labels_,  # (N_total,) closest centre of every codebook descriptor
+        method=params.method,
+        n_keypoints=params.n_keypoints,
+        n_octaves=params.n_octaves,
+        n_scales=params.n_scales,
+        sigma_min=params.sigma_min,
+    )
+    return path
+
+
+def load_codebook(path: Path = CODEBOOK_FILE) -> tuple[np.ndarray, np.ndarray, FeatureParams]:
+    if not path.is_file():
+        raise ValueError("No codebook found. Run 'Construct Codebook' first.")
+    with np.load(path) as data:
+        params = FeatureParams(
+            str(data["method"]), int(data["n_keypoints"]), int(data["n_octaves"]),
+            int(data["n_scales"]), float(data["sigma_min"]),
+        )
+        return data["centers"], data["words"], params
 
 
 def visual_word_patches(kmeans, descriptors, owners, keypoints, grays, size=PATCH_SIZE) -> list[np.ndarray]:
@@ -170,6 +201,7 @@ class CodebookTool(ForensicsTool):
         if len(keypoints) < n_clusters:
             raise ValueError(f"Only {len(keypoints)} descriptors found; K must not be larger.")
         kmeans, descriptors = build_codebook(feature_descriptors, n_clusters)
+        codebook_file = save_codebook(kmeans, params)
 
         plot_keypoints(grays, keypoints_per_image, [path.parent.name for path in paths])
         plot_patches(visual_word_patches(kmeans, descriptors, owners, keypoints, grays))
@@ -186,5 +218,6 @@ class CodebookTool(ForensicsTool):
                 "Descriptors shape": str(descriptors.shape),
                 "Visual words (K)": str(n_clusters),
                 "Centres shape": str(kmeans.cluster_centers_.shape),
+                "Codebook file": str(codebook_file),
             },
         )
