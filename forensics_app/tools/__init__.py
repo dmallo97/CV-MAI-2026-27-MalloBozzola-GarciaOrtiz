@@ -19,6 +19,7 @@ from .image_lookup import ImageLookupTool
 from .face_detection import FaceDetectionTool, WebcamFaceDetectionTool
 from .eigenfaces import EigenfaceBuilderTool
 from .codebook import CodebookTool
+from .visual_word_histogram import CodebookHistogramTool, NewImageHistogramTool
 
 
 
@@ -48,6 +49,8 @@ def build_tool_registry() -> ToolRegistry:
             WebcamFaceDetectionTool(),
             EigenfaceBuilderTool(),
             CodebookTool(),
+            CodebookHistogramTool(),
+            NewImageHistogramTool(),
         ]
     )
 
