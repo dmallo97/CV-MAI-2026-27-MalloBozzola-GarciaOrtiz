@@ -11,14 +11,20 @@ import numpy as np
 from PIL import Image
 
 from forensics_app.core import ImageDocument
+from forensics_app.tools.base import ToolResult
 from forensics_app.tools.eigenfaces import (
     EigenfaceBuilderTool,
     EigenfaceModel,
+    FaceRecognitionTool,
     build_eigenfaces,
+    find_closest,
     load_face_folder,
     plot_eigenfaces,
+    plot_matches,
+    prepare_face,
     project,
     save_faces,
+    train_face,
 )
 
 FACE_SHAPE = (12, 10)  # (H, W)
@@ -115,6 +121,100 @@ class EigenfaceBuilderToolTests(unittest.TestCase):
     @patch("forensics_app.tools.eigenfaces._ask_train_folder", return_value=None)
     def test_cancel_returns_none(self, _ask_train_folder) -> None:
         self.assertIsNone(EigenfaceBuilderTool().run(MagicMock(), ImageDocument()))
+
+
+class RecognitionTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        _write_folder(Path(self.tmp.name))
+        self.model = build_eigenfaces(load_face_folder(self.tmp.name), 5)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_prepare_face_converts_and_resizes(self) -> None:
+        image = Image.new("RGB", (40, 30), (255, 255, 255))
+        face = prepare_face(image, FACE_SHAPE)
+        self.assertEqual(face.shape, (FACE_SHAPE[0] * FACE_SHAPE[1],))
+        np.testing.assert_allclose(face, 1.0)
+
+    def test_training_face_finds_itself(self) -> None:
+        with Image.open(self.model.paths[5]) as image:
+            face = prepare_face(image, FACE_SHAPE)
+        matches = find_closest(self.model, project(face[None], self.model.mean, self.model.eigenfaces)[0])
+        self.assertEqual(matches[0].index, 5)
+        self.assertEqual(matches[0].label, "Alan Turing")
+        self.assertAlmostEqual(matches[0].distance, 0.0, places=6)
+
+    def test_matches_are_sorted_and_k_is_limited(self) -> None:
+        matches = find_closest(self.model, self.model.coefficients[0], k=20)  # only 8 faces
+        distances = [match.distance for match in matches]
+        self.assertEqual(len(matches), 8)
+        self.assertEqual(distances, sorted(distances))
+
+    def test_train_face_is_rebuilt_when_the_file_is_missing(self) -> None:
+        model = EigenfaceModel(**{**vars(self.model), "paths": np.array(["missing.png"] * 8)})
+        expected = (model.mean + model.coefficients[2] @ model.eigenfaces).reshape(FACE_SHAPE)
+        np.testing.assert_allclose(train_face(model, 2), expected)
+
+    def test_plot_has_test_face_plus_k_matches(self) -> None:
+        matches = find_closest(self.model, self.model.coefficients[0], k=3)
+        figure = plot_matches(self.model.mean, "Ada Lovelace", matches, self.model)
+        self.assertEqual(sum(1 for axis in figure.axes if axis.images), 4)
+
+
+class FaceRecognitionToolTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        _write_folder(root / "train")
+        self.model_file = build_eigenfaces(load_face_folder(root / "train"), 5).save(root / "model.npz")
+        self.document = ImageDocument()
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _run(self) -> ToolResult | None:
+        with patch("forensics_app.tools.eigenfaces.MODEL_FILE", self.model_file):
+            return FaceRecognitionTool().run(MagicMock(), self.document)
+
+    @patch("forensics_app.tools.eigenfaces._show_matches")
+    @patch("forensics_app.tools.eigenfaces._ask_neighbours", return_value=2)
+    def test_recognises_a_face_of_a_known_person(self, _ask_neighbours, show_matches) -> None:
+        self.document.load(Path(self.tmp.name) / "train" / "Ada_Lovelace" / "0001.png")
+        result = self._run()
+
+        self.assertIsNone(result.image)
+        self.assertEqual(result.details["Prediction"], "Ada Lovelace")
+        self.assertEqual(result.details["True name"], "Ada Lovelace")
+        self.assertEqual(result.details["Correct"], "yes")
+        self.assertIn("Match 2", result.details)
+        self.assertNotIn("Match 3", result.details)
+        self.assertIn("Note", result.details)  # it is a training image
+        show_matches.assert_called_once()
+
+    @patch("forensics_app.tools.eigenfaces._show_matches")
+    @patch("forensics_app.tools.eigenfaces._ask_neighbours", return_value=3)
+    def test_unknown_folder_has_no_true_name(self, _ask_neighbours, _show_matches) -> None:
+        path = Path(self.tmp.name) / "holiday" / "photo.png"
+        path.parent.mkdir()
+        Image.new("RGB", (40, 30), (90, 120, 150)).save(path)
+        self.document.load(path)
+        result = self._run()
+
+        self.assertEqual(result.details["True name"], "Unknown")
+        self.assertEqual(result.details["Correct"], "-")
+        self.assertEqual(result.details["Input size (W x H)"], "40 x 30")
+
+    @patch("forensics_app.tools.eigenfaces._ask_neighbours", return_value=None)
+    def test_cancel_returns_none(self, _ask_neighbours) -> None:
+        self.document.load(Path(self.tmp.name) / "train" / "Ada_Lovelace" / "0001.png")
+        self.assertIsNone(self._run())
+
+    def test_missing_model_is_reported(self) -> None:
+        with patch("forensics_app.tools.eigenfaces.MODEL_FILE", Path(self.tmp.name) / "none.npz"):
+            with self.assertRaises(ValueError):
+                FaceRecognitionTool().run(MagicMock(), self.document)
 
 
 if __name__ == "__main__":
