@@ -17,7 +17,7 @@ from .corners import CornerDetectionTool
 from .feature_matching import FeatureMatchingTool, KeypointsTool
 from .image_lookup import ImageLookupTool
 from .face_detection import FaceDetectionTool, WebcamFaceDetectionTool
-from .eigenfaces import EigenfaceBuilderTool
+from .eigenfaces import EigenfaceBuilderTool, FaceRecognitionTool
 from .codebook import CodebookTool
 from .visual_word_histogram import CodebookHistogramTool, NewImageHistogramTool
 
@@ -48,6 +48,7 @@ def build_tool_registry() -> ToolRegistry:
             FaceDetectionTool(),
             WebcamFaceDetectionTool(),
             EigenfaceBuilderTool(),
+            FaceRecognitionTool(),
             CodebookTool(),
             CodebookHistogramTool(),
             NewImageHistogramTool(),
