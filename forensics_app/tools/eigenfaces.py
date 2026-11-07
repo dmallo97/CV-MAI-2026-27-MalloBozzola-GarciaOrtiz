@@ -29,6 +29,9 @@ DEFAULT_COMPONENTS = 100
 DEFAULT_SHOWN = 12
 GALLERY_COLUMNS = 4
 
+DEFAULT_NEIGHBOURS = 3
+MAX_NEIGHBOURS = 10
+
 @dataclass(frozen=True)
 class FaceSet:
     images: np.ndarray  # (N, H, W) float in [0, 1]; N = number of images, H, W = height and width of each image; float values (for PCA)
@@ -82,13 +85,25 @@ class EigenfaceModel:
                 image_shape=tuple(int(side) for side in data["image_shape"]),
                 explained_variance_ratio=data["explained_variance_ratio"],
             )
-            
+
+
+@dataclass(frozen=True)
+class Match:
+    index: int  # row of the training face in the model
+    label: str  # person name of the training face
+    distance: float  # Euclidean distance between PCA coefficients (eigenface space, not pixels)
+
+
 # ---------- Pure functions ----------
 
 def to_uint8(face: np.ndarray) -> np.ndarray:
     """LFW faces may come in [0, 1] or [0, 255] depending on the sklearn version."""
     scale = 255.0 if face.max() <= 1.0 else 1.0
     return np.clip(face * scale, 0, 255).astype(np.uint8)
+
+def face_label(path: Path) -> str:
+    """Person name of a face image, given by its subfolder (George_W_Bush -> George W Bush)."""
+    return path.parent.name.replace("_", " ")
 
 def save_faces(images: np.ndarray, names: list[str], folder: Path) -> None:
     """Write folder/<Person_Name>/<index>.png: the subfolder keeps the image and the name pair."""
@@ -129,7 +144,7 @@ def load_face_folder(folder: str | Path) -> FaceSet:
                 continue
             with Image.open(path) as image:
                 images.append(np.asarray(image.convert("L"), dtype=np.float64) / 255.0) # turn image as grayscale floats and scale them
-            labels.append(person_dir.name.replace("_", " "))
+            labels.append(face_label(path))
             paths.append(path)
     if not images:
         raise ValueError(f"No face images found in the subfolders of '{folder.name}'.")
@@ -179,6 +194,47 @@ def plot_eigenfaces(model: EigenfaceModel, k: int = DEFAULT_SHOWN, n_cols: int =
     for axis, face, title in zip(np.ravel(axes), faces, titles):
         axis.imshow(face.reshape(model.image_shape), cmap="gray")
         axis.set_title(title, size=10)
+    figure.tight_layout()
+    return figure
+
+
+# Recognition: a new face is prepared exactly like the training ones (grayscale, same size, [0, 1]),
+# projected onto the eigenfaces and compared with the coefficients of every training face.
+def prepare_face(image: Image.Image, image_shape: tuple[int, int]) -> np.ndarray:
+    """Flattened (D,) grayscale face in [0, 1], resized to the (H, W) of the model if needed."""
+    height, width = image_shape
+    gray = image.convert("L")
+    if gray.size != (width, height):  # PIL sizes are (W, H)
+        gray = gray.resize((width, height))
+    return np.asarray(gray, dtype=np.float64).ravel() / 255.0
+
+
+def find_closest(model: EigenfaceModel, coefficients: np.ndarray, k: int = DEFAULT_NEIGHBOURS) -> list[Match]:
+    """The k training faces whose coefficients are closest (Euclidean) to the given (K,) ones."""
+    distances = np.linalg.norm(model.coefficients - coefficients, axis=1)  # (N,) one per training face
+    closest = np.argsort(distances)[:k]  # the slice already limits k to N
+    return [Match(int(index), str(model.labels[index]), float(distances[index])) for index in closest]
+
+
+def train_face(model: EigenfaceModel, index: int) -> np.ndarray:
+    """Training face (H, W) in [0, 1]: read from its file, or rebuilt as mean + w U_K if the file moved."""
+    path = Path(model.paths[index])
+    if path.is_file():
+        with Image.open(path) as image:
+            return np.asarray(image.convert("L"), dtype=np.float64) / 255.0
+    return (model.mean + model.coefficients[index] @ model.eigenfaces).reshape(model.image_shape)
+
+
+def plot_matches(face: np.ndarray, true_label: str | None, matches: list[Match], model: EigenfaceModel) -> plt.Figure:
+    """The test face followed by its closest training faces, titled with their name and distance."""
+    n_cols = len(matches) + 1
+    figure, axes = plt.subplots(1, n_cols, figsize=(2.2 * n_cols, 2.8), squeeze=False)
+    faces = [face.reshape(model.image_shape), *(train_face(model, match.index) for match in matches)]
+    titles = [f"Test\n{true_label or 'Unknown'}", *(f"{match.label}\nd = {match.distance:.2f}" for match in matches)]
+    for axis, image, title in zip(axes.ravel(), faces, titles):
+        axis.imshow(image, cmap="gray")
+        axis.set_title(title, size=9)
+        axis.axis("off")
     figure.tight_layout()
     return figure
 
@@ -241,8 +297,19 @@ def _ask_train_folder(parent: tk.Misc) -> Path | None:
 
 def _show_gallery(figure: plt.Figure) -> None:
     plt.show(block=False)
-    
-# ---------- Tool ----------
+
+
+def _ask_neighbours(parent: tk.Misc) -> int | None:
+    return simpledialog.askinteger(
+        "Face recognition", f"Closest training faces to show (1-{MAX_NEIGHBOURS}):", parent=parent,
+        initialvalue=DEFAULT_NEIGHBOURS, minvalue=1, maxvalue=MAX_NEIGHBOURS,
+    )
+
+
+def _show_matches(figure: plt.Figure) -> None:
+    plt.show(block=False)
+
+# ---------- Tools ----------
 
 class EigenfaceBuilderTool(ForensicsTool):
     tool_id = "eigenface_builder"
@@ -295,4 +362,63 @@ class EigenfaceBuilderTool(ForensicsTool):
                 "Coefficients shape": str(model.coefficients.shape),
                 "Model file": str(model_file),
             },
+        )
+
+
+class FaceRecognitionTool(ForensicsTool):
+    tool_id = "face_recognition"
+    title = "Face recognition (eigenfaces)"
+    category = "Faces"
+    description = (
+        "Project the current face onto the saved eigenfaces and show the closest "
+        "training faces with their names."
+    )
+
+    def run(self, parent: tk.Misc, document: ImageDocument) -> ToolResult | None:
+        if not MODEL_FILE.is_file():
+            raise ValueError("No eigenface model found. Run 'Eigenface builder (PCA)' first.")
+        k = _ask_neighbours(parent)
+        if k is None:
+            return None
+
+        assert document.current is not None
+        model = EigenfaceModel.load(MODEL_FILE)
+        face = prepare_face(document.current, model.image_shape)
+        coefficients = project(face[None], model.mean, model.eigenfaces)[0]  # (K,) w of the test face
+        matches = find_closest(model, coefficients, k)
+
+        # The true name is only known when the image sits in a person folder of the model (e.g. lfw/test/<Name>/)
+        true_label = face_label(document.path) if document.path else None
+        if true_label not in model.labels:
+            true_label = None
+        prediction = matches[0].label
+        if true_label is None:
+            verdict, correct = "", "-"
+        elif prediction == true_label:
+            verdict, correct = " (correct)", "yes"
+        else:
+            verdict, correct = f" (wrong, it is {true_label})", "no"
+
+        _show_matches(plot_matches(face, true_label, matches, model))
+        width, height = document.current.size
+        model_height, model_width = model.image_shape
+        details = {
+            "Operation": "Face recognition (eigenfaces)",
+            "Prediction": prediction,
+            "True name": true_label or "Unknown",
+            "Correct": correct,
+            "Input size (W x H)": f"{width} x {height}",
+            "Face size (W x H)": f"{model_width} x {model_height}",
+            "Eigenfaces (K)": str(model.n_components),
+            "Training faces": str(len(model.labels)),
+            **{
+                f"Match {number}": f"{match.label} (d = {match.distance:.2f})"
+                for number, match in enumerate(matches, start=1)
+            },
+        }
+        if matches[0].distance < 1e-6:
+            details["Note"] = "The closest face is identical: this image belongs to the training set."
+        return ToolResult(
+            message=f"Closest face: {prediction} (d = {matches[0].distance:.2f}){verdict}.",
+            details=details,
         )
