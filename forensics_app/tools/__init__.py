@@ -20,6 +20,7 @@ from .face_detection import FaceDetectionTool, WebcamFaceDetectionTool
 from .eigenfaces import EigenfaceBuilderTool, FaceRecognitionTool
 from .codebook import CodebookTool
 from .visual_word_histogram import CodebookHistogramTool, NewImageHistogramTool
+from .bow_classification import ClassifyImageTool, SplitDatasetTool
 
 
 
@@ -49,9 +50,11 @@ def build_tool_registry() -> ToolRegistry:
             WebcamFaceDetectionTool(),
             EigenfaceBuilderTool(),
             FaceRecognitionTool(),
+            SplitDatasetTool(),
             CodebookTool(),
             CodebookHistogramTool(),
             NewImageHistogramTool(),
+            ClassifyImageTool(),
         ]
     )
 
