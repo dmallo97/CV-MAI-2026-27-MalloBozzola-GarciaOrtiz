@@ -47,13 +47,22 @@ def build_codebook(feature_descriptors: list[np.ndarray], n_clusters: int) -> tu
     return kmeans, descriptors
 
 
-def save_codebook(kmeans: MiniBatchKMeans, params: FeatureParams, path: Path = CODEBOOK_FILE) -> Path:
-    """Save the centres, the word of every codebook descriptor and the descriptor settings."""
+def save_codebook(
+    kmeans: MiniBatchKMeans,
+    params: FeatureParams,
+    owners: list[int],
+    paths: list[Path],
+    path: Path = CODEBOOK_FILE,
+) -> Path:
+    """Save the centres, the word of every codebook descriptor, its image and the descriptor settings."""
     path.parent.mkdir(parents=True, exist_ok=True)
     np.savez(
         path,
         centers=kmeans.cluster_centers_,  # (K, D) the visual words
         words=kmeans.labels_,  # (N_total,) closest centre of every codebook descriptor
+        owners=np.array(owners),  # (N_total,) image of every codebook descriptor (index into image_paths)
+        image_paths=np.array([str(image_path) for image_path in paths]),
+        image_labels=np.array([image_path.parent.name for image_path in paths]),  # class = parent folder
         method=params.method,
         n_keypoints=params.n_keypoints,
         n_octaves=params.n_octaves,
@@ -72,6 +81,16 @@ def load_codebook(path: Path = CODEBOOK_FILE) -> tuple[np.ndarray, np.ndarray, F
             int(data["n_scales"]), float(data["sigma_min"]),
         )
         return data["centers"], data["words"], params
+
+
+def load_training_data(path: Path = CODEBOOK_FILE) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Words and owner image of every codebook descriptor, plus the class and path of every image."""
+    if not path.is_file():
+        raise ValueError("No codebook found. Run 'Construct Codebook' first.")
+    with np.load(path) as data:
+        if "owners" not in data.files:
+            raise ValueError("This codebook has no per-image data. Rebuild it with 'Construct Codebook'.")
+        return data["words"], data["owners"], data["image_labels"], data["image_paths"]
 
 
 def visual_word_patches(kmeans, descriptors, owners, keypoints, grays, size=PATCH_SIZE) -> list[np.ndarray]:
@@ -201,7 +220,7 @@ class CodebookTool(ForensicsTool):
         if len(keypoints) < n_clusters:
             raise ValueError(f"Only {len(keypoints)} descriptors found; K must not be larger.")
         kmeans, descriptors = build_codebook(feature_descriptors, n_clusters)
-        codebook_file = save_codebook(kmeans, params)
+        codebook_file = save_codebook(kmeans, params, owners, paths)
 
         plot_keypoints(grays, keypoints_per_image, [path.parent.name for path in paths])
         plot_patches(visual_word_patches(kmeans, descriptors, owners, keypoints, grays))
