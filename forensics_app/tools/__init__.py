@@ -21,6 +21,8 @@ from .eigenfaces import EigenfaceBuilderTool, FaceRecognitionTool
 from .codebook import CodebookTool
 from .visual_word_histogram import CodebookHistogramTool, NewImageHistogramTool
 from .bow_classification import ClassifyImageTool, SplitDatasetTool
+from .yolo_detection import YoloDetectionTool
+from .yolo_training import YoloTrainingTool
 
 
 
@@ -55,6 +57,8 @@ def build_tool_registry() -> ToolRegistry:
             CodebookHistogramTool(),
             NewImageHistogramTool(),
             ClassifyImageTool(),
+            YoloDetectionTool(),
+            YoloTrainingTool(),
         ]
     )
 
