@@ -21,10 +21,18 @@ from .eigenfaces import EigenfaceBuilderTool, FaceRecognitionTool
 from .codebook import CodebookTool
 from .visual_word_histogram import CodebookHistogramTool, NewImageHistogramTool
 from .bow_classification import ClassifyImageTool, SplitDatasetTool
+from .cnn_classification import (
+    CnnClassifyTool,
+    CnnFeatureProjectionTool,
+    CnnPassportTool,
+    CnnSession,
+    LoadCnnModelTool,
+)
 
 
 
 def build_tool_registry() -> ToolRegistry:
+    cnn_session = CnnSession()  # model shared by the 'Classify using CNN' tools
     return ToolRegistry(
         [
             ImageInfoTool(),
@@ -55,6 +63,10 @@ def build_tool_registry() -> ToolRegistry:
             CodebookHistogramTool(),
             NewImageHistogramTool(),
             ClassifyImageTool(),
+            LoadCnnModelTool(cnn_session),
+            CnnPassportTool(cnn_session),
+            CnnClassifyTool(cnn_session),
+            CnnFeatureProjectionTool(cnn_session),
         ]
     )
 
