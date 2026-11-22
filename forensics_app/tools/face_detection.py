@@ -172,15 +172,21 @@ def describe_faces(faces: list[Face]) -> dict[str, str]:
 # ---------- Dialog ----------
 
 class FaceDetectionDialog(simpledialog.Dialog):
-    def __init__(self, parent: tk.Misc, title: str) -> None:
+    """Score and NMS thresholds; also used by the YOLO detector with its own defaults."""
+
+    def __init__(
+        self, parent: tk.Misc, title: str,
+        score: float = DEFAULT_SCORE_THRESHOLD, nms: float = DEFAULT_NMS_THRESHOLD,
+    ) -> None:
         self.options: tuple[float, float] | None = None
+        self.defaults = (score, nms)
         super().__init__(parent, title)
 
     def body(self, master: tk.Frame) -> tk.Widget:
         frame = ttk.LabelFrame(master, text="Parameters", padding=8)
         frame.pack(fill="x", padx=8, pady=8)
-        self.score = tk.StringVar(master, value=str(DEFAULT_SCORE_THRESHOLD))
-        self.nms = tk.StringVar(master, value=str(DEFAULT_NMS_THRESHOLD))
+        self.score = tk.StringVar(master, value=str(self.defaults[0]))
+        self.nms = tk.StringVar(master, value=str(self.defaults[1]))
 
         ttk.Label(frame, text="Score threshold (0-1):").grid(row=0, column=0, sticky="w", pady=2)
         first = ttk.Spinbox(frame, from_=0.0, to=1.0, increment=0.05, textvariable=self.score, width=8)

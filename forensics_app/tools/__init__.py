@@ -28,6 +28,8 @@ from .cnn_classification import (
     CnnSession,
     LoadCnnModelTool,
 )
+from .yolo_detection import YoloDetectionTool
+from .yolo_training import YoloTrainingTool
 
 
 
@@ -67,6 +69,8 @@ def build_tool_registry() -> ToolRegistry:
             CnnPassportTool(cnn_session),
             CnnClassifyTool(cnn_session),
             CnnFeatureProjectionTool(cnn_session),
+            YoloDetectionTool(),
+            YoloTrainingTool(),
         ]
     )
 
