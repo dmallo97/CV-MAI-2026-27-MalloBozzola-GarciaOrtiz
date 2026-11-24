@@ -106,9 +106,11 @@ def yolo_dataset_dir(coco_folder: Path) -> Path:
 
 
 def training_device() -> str:
-    """Apple GPU (MPS) when available: Ultralytics picks CUDA or CPU by itself, never MPS."""
+    """NVIDIA GPU (CUDA), then Apple GPU (MPS), then CPU: Ultralytics never picks MPS by itself."""
     import torch
 
+    if torch.cuda.is_available():
+        return "cuda"
     return "mps" if torch.backends.mps.is_available() else "cpu"
 
 
