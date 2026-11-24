@@ -17,6 +17,7 @@ from forensics_app.tools.yolo_training import (
     load_trained,
     save_trained,
     train_yolo,
+    training_device,
     yolo_dataset_dir,
 )
 
@@ -102,6 +103,12 @@ class TrainAndSaveTests(unittest.TestCase):
         )
         self.assertEqual(metrics["mAP50"], 0.75)
         self.assertEqual(metrics["mAP50-95"], 0.5)
+
+    def test_device_prefers_cuda_then_mps(self) -> None:
+        for cuda, mps, expected in ((True, True, "cuda"), (False, True, "mps"), (False, False, "cpu")):
+            with patch("torch.cuda.is_available", return_value=cuda), \
+                    patch("torch.backends.mps.is_available", return_value=mps):
+                self.assertEqual(training_device(), expected)
 
     def test_save_copies_best_weights_and_load_needs_them(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
