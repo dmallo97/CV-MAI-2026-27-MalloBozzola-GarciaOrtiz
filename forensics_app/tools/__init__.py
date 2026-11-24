@@ -30,6 +30,7 @@ from .cnn_classification import (
 )
 from .yolo_detection import YoloDetectionTool
 from .yolo_training import YoloTrainingTool
+from .yolo_testing import YoloTestingTool
 
 
 
@@ -71,6 +72,7 @@ def build_tool_registry() -> ToolRegistry:
             CnnFeatureProjectionTool(cnn_session),
             YoloDetectionTool(),
             YoloTrainingTool(),
+            YoloTestingTool(),
         ]
     )
 
